@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 from utils.llm_call import get_response_from_llm, parse_json_response, MAX_TOKENS_QUESTION, MAX_TOKENS_FEEDBACK
-from utils.prompts import next_question_generation, feedback_generation
+from utils.prompts import next_question_generation, feedback_generation, overall_feedback_generation
 
 # Thread pool for CPU-bound tasks
 executor = ThreadPoolExecutor(max_workers=4)
@@ -172,3 +172,64 @@ async def analyze_candidate_response_and_generate_new_question(
         raise
     except Exception as e:
         raise InterviewAnalysisError(f"Response analysis failed: {str(e)}")
+
+async def get_overall_interview_feedback(
+    candidate_name: str,
+    conversations: list,
+    job_description: str,
+    resume_highlights: str,
+    overall_score: float
+) -> Dict[str, Any]:
+    """
+    Generate overall feedback for the entire interview
+    
+    Args:
+        candidate_name: Name of the candidate
+        conversations: List of all interview conversations with Q&A and feedback
+        job_description: Job description/requirements
+        resume_highlights: Key highlights from candidate's resume
+        overall_score: Overall evaluation score (0-10)
+        
+    Returns:
+        Dict containing overall feedback, strengths, areas for improvement, and recommendation
+        
+    Raises:
+        InterviewAnalysisError: If feedback generation fails
+    """
+    try:
+        # Format conversations summary
+        conversations_summary = ""
+        for i, conv in enumerate(conversations, 1):
+            conversations_summary += f"\nQuestion {i}: {conv.get('Question', 'N/A')}\n"
+            conversations_summary += f"Candidate Answer: {conv.get('Candidate Answer', 'N/A')}\n"
+            conversations_summary += f"Score: {conv.get('Evaluation', 0)}/10\n"
+            conversations_summary += f"Feedback: {conv.get('Feedback', 'N/A')}\n"
+            conversations_summary += "---\n"
+        
+        final_prompt = overall_feedback_generation.format(
+            candidate_name=candidate_name,
+            job_description=job_description,
+            resume_highlights=resume_highlights,
+            total_questions=len(conversations),
+            overall_score=round(overall_score, 2),
+            conversations_summary=conversations_summary
+        )
+        
+        # Use higher token limit for overall feedback (it's more comprehensive)
+        response = await _make_llm_call_async(final_prompt, max_tokens=800)
+        
+        # Validate response structure
+        required_fields = ["overall_feedback", "key_strengths", "areas_for_improvement", "recommendation"]
+        missing_fields = [field for field in required_fields if field not in response]
+        if missing_fields:
+            raise InterviewAnalysisError(f"Missing fields in response: {missing_fields}")
+        
+        return {
+            "overall_feedback": response["overall_feedback"],
+            "key_strengths": response.get("key_strengths", []),
+            "areas_for_improvement": response.get("areas_for_improvement", []),
+            "recommendation": response.get("recommendation", "")
+        }
+        
+    except Exception as e:
+        raise InterviewAnalysisError(f"Overall feedback generation failed: {str(e)}")

@@ -1,0 +1,55 @@
+{
+  "name": "Aryan Kumar",
+  "createdAt": "2025-11-24T03:06:23.099359Z",
+  "updatedAt": "2025-11-24T03:06:23.099359Z",
+  "id": 1,
+  "job_description": "",
+  "resume_highlights": "Achieved a CGPA of 9.12 in B.Tech Computer Science and Engineering at Vellore Institute of Technology. During an internship at Bluestocks FinTech, built a scalable transaction system with Kafka and Node.js, handling over 100K daily operations and improving throughput by 45%. As a Quant Research Consultant at World Quant, ranked in the top 1.5% globally in the International Quant Championship 2024 and built over 5 predictive alphas. Completed a personal project, Graph Algorithms Visualizer, demonstrating skills in real-time grid manipulation and algorithm comparisons.",
+  "conversations": [
+    {
+      "Question": "Hi Aryan Kumar, welcome to this AI interview! My name is  and I'll be your interviewer today. Let's get started!\n\nCan you tell me a little bit about your goals and aspirations?",
+      "Candidate Answer": "Okay, so talking about my goal, my goal is to become a top competitive programmer and a good software engineer",
+      "Evaluation": 7.0,
+      "Feedback": "Your goal of becoming a top competitive programmer and software engineer is commendable, showcasing ambition. However, expanding on how your experiences align with these goals could enhance your response. Include specific steps you're taking to achieve them, such as participating in competitions or pursuing further education. This would demonstrate a proactive approach. Overall, your academic and internship achievements are impressive and relevant. Focus on clarity and structure in your responses to make a stronger impact in future interviews."
+    },
+    {
+      "Question": "Can you share an experience where you faced a significant challenge while working on a project, specifically at Bluestocks FinTech or during your studies? How did you approach the problem, and what was the outcome?",
+      "Candidate Answer": "Okay, so during my internship at BlueStock Fintech, we were given a task to work on a scalable system. So, there my role was to decrease the write latency of the database using Kafka and Node.js.",
+      "Evaluation": 6.0,
+      "Feedback": "Your response highlighted relevant technical experience with Kafka and Node.js, showing your ability to tackle significant challenges. However, it lacked a clear structure and specific outcomes related to your actions. To enhance, articulate the challenge more explicitly, detail the steps taken, and quantify the impact on the project's success. This will demonstrate your problem-solving skills and the results achieved. Overall, your experience aligns with the job requirements, but focus on clarity and impact in future responses."
+    },
+    {
+      "Question": "Can you describe a situation in your project work where you had to collaborate with a team to achieve a common goal? What role did you play, and how did you ensure effective communication and collaboration among team members?",
+      "Candidate Answer": "ok i worked wwith them closely guiding them to complete their goal ",
+      "Evaluation": 4.0,
+      "Feedback": "Your response indicates a collaborative mindset, but it lacks detail and structure. Strengths include your willingness to guide team members. However, to improve, provide specific examples of your role and actions taken to foster communication. Highlight measurable outcomes from the project to demonstrate impact. This aligns with the job's emphasis on teamwork and effective communication. For future responses, articulate your contributions clearly and back them with concrete results to enhance your candidacy."
+    },
+    {
+      "Question": "In your experience at Bluestocks FinTech, you mentioned building a scalable transaction system. Can you walk me through a specific challenge you faced during that project, how you approached it, and what the outcome was? Additionally, how did you incorporate feedback from your team or stakeholders during that process?",
+      "Candidate Answer": "yes i worked there ",
+      "Evaluation": 3.0,
+      "Feedback": "Your response lacked depth and detail, which made it difficult to assess your experience fully. Strengths include your impressive background in FinTech and quant research. However, you need to provide specific challenges faced, your problem-solving approach, and how you engaged with your team. This will enhance clarity and structure. Ensure you communicate measurable outcomes effectively. Align your responses with the job requirements by showcasing your leadership and teamwork skills. Practice articulating your experiences more clearly in future interviews."
+    },
+    {
+      "Question": "You mentioned the importance of incorporating feedback from your team during the project at Bluestocks FinTech. Can you give me an example of a time when you received constructive criticism from a peer or stakeholder? How did you respond to it, and what changes did you implement as a result?",
+      "Candidate Answer": "ask different question regarding a coding question ",
+      "Evaluation": 5.0,
+      "Feedback": "Your technical achievements are impressive, yet your response lacked relevance to the question asked about handling constructive criticism. To improve, focus on providing a structured example of feedback received and specific changes made in response. This would demonstrate your adaptability and collaboration skills. As a candidate for a technical role, showcasing your ability to learn from others is crucial. In future interviews, prepare to address interpersonal experiences alongside technical ones to present a well-rounded profile."
+    }
+  ],
+  "overall_score": 5.0,
+  "overall_feedback": {
+    "overall_feedback": "Aryan Kumar demonstrated a solid academic foundation and relevant technical experience during the interview. His achievements, such as a CGPA of 9.12 and impactful projects at Bluestocks FinTech, indicate a strong potential in software engineering. However, the performance across the interview questions highlighted significant gaps in communication and depth of responses. Aryan's answers often lacked structure and specific examples, which hindered the ability to assess his problem-solving skills and teamwork effectively. While he displayed a general understanding of the technical aspects of his experiences, he needs to articulate his contributions and outcomes more clearly. Additionally, engaging more deeply with the questions posed would enhance his overall performance. Despite these areas for improvement, Aryan's technical skills and achievements suggest he has the foundation to grow in a software engineering role. With focused development in communication and experience-sharing, he could become a valuable asset to the team.",
+    "key_strengths": [
+      "Strong academic performance and technical knowledge",
+      "Relevant internship experience in a fast-paced environment",
+      "Demonstrated ambition and clear career goals"
+    ],
+    "areas_for_improvement": [
+      "Enhance communication skills for clearer and more structured responses",
+      "Provide specific examples and measurable outcomes in answers",
+      "Improve ability to articulate teamwork and collaborative experiences"
+    ],
+    "recommendation": "While Aryan shows potential and possesses valuable technical skills, he should focus on improving his communication and response structure to better align with the company's expectations. With targeted development, he could be a suitable candidate for future opportunities."
+  }
+}

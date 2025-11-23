@@ -54,12 +54,27 @@ function App() {
     setMaxQuestions(data.max_questions || 5)
   }
 
+  // State for overall feedback
+  const [overallFeedback, setOverallFeedback] = useState(null)
+  const [overallScore, setOverallScore] = useState(null)
+
   // Real-time API hook (OpenAI via WebSocket)
   const { isConnected, sendAudio, endAudio, isAISpeaking } = useRealtimeAPI(
     interviewStarted && useRealtime ? sessionId : null,
     (message) => {
       // Handle real-time messages from OpenAI
       setMessages((prev) => [...prev, message])
+      
+      // Check if this is interview completion with feedback
+      if (message.interviewCompleted) {
+        setInterviewCompleted(true)
+        if (message.overallScore !== undefined) {
+          setOverallScore(message.overallScore)
+        }
+        if (message.overallFeedback) {
+          setOverallFeedback(message.overallFeedback)
+        }
+      }
     },
     (error) => {
       console.error('OpenAI API error:', error)
@@ -435,6 +450,11 @@ function App() {
         }),
       })
 
+      if (!processResponse.ok) {
+        const errorData = await processResponse.json().catch(() => ({ detail: 'Unknown error' }))
+        throw new Error(errorData.detail || `HTTP error! status: ${processResponse.status}`)
+      }
+
       const processData = await processResponse.json()
 
       // Add feedback message (optional, can be shown in UI)
@@ -449,6 +469,12 @@ function App() {
             ...prev,
             { role: 'assistant', content: processData.thanks_message },
           ])
+        }
+        if (processData.overall_score !== undefined) {
+          setOverallScore(processData.overall_score)
+        }
+        if (processData.overall_feedback) {
+          setOverallFeedback(processData.overall_feedback)
         }
       } else if (processData.next_question) {
         setMessages((prev) => [
@@ -484,6 +510,11 @@ function App() {
         }),
       })
 
+      if (!processResponse.ok) {
+        const errorData = await processResponse.json().catch(() => ({ detail: 'Unknown error' }))
+        throw new Error(errorData.detail || `HTTP error! status: ${processResponse.status}`)
+      }
+
       const processData = await processResponse.json()
 
       if (processData.interview_completed) {
@@ -493,6 +524,12 @@ function App() {
             ...prev,
             { role: 'assistant', content: processData.thanks_message },
           ])
+        }
+        if (processData.overall_score !== undefined) {
+          setOverallScore(processData.overall_score)
+        }
+        if (processData.overall_feedback) {
+          setOverallFeedback(processData.overall_feedback)
         }
       } else if (processData.next_question) {
         setMessages((prev) => [
@@ -531,6 +568,8 @@ function App() {
           onStartRecording={startRecording}
           onStopRecording={stopRecording}
           isRecording={isRecording}
+          overallFeedback={overallFeedback}
+          overallScore={overallScore}
         />
         <VideoPanel
           candidateName={candidateName}

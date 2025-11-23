@@ -166,11 +166,14 @@ export function useRealtimeAPI(sessionId, onMessage, onError) {
                 }
                 // Signal that we can resume listening (will be set after audio playback)
               } else if (msgType === 'interview_completed') {
-                // Interview completed
+                // Interview completed - send message with feedback data
                 if (data.message && onMessageRef.current) {
                   onMessageRef.current({
                     role: 'assistant',
-                    content: data.message
+                    content: data.message,
+                    interviewCompleted: true,
+                    overallScore: data.overall_score,
+                    overallFeedback: data.overall_feedback
                   })
                 }
               } else if (msgType === 'error') {

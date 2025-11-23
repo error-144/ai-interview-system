@@ -205,10 +205,107 @@
 
 .interview-completed {
   padding: 20px 24px;
-  text-align: center;
   background-color: #f0fdf4;
   color: #166534;
+}
+
+.feedback-container {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.feedback-container h3 {
+  text-align: center;
+  margin-bottom: 24px;
+  color: #166534;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.score-section {
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+.score-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 32px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  color: white;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.score-label {
+  font-size: 18px;
   font-weight: 500;
+}
+
+.score-value {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.feedback-content {
+  background-color: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: 20px;
+}
+
+.feedback-section {
+  margin-bottom: 24px;
+}
+
+.feedback-section:last-child {
+  margin-bottom: 0;
+}
+
+.feedback-section h4 {
+  color: #667eea;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.feedback-section p {
+  color: #374151;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.feedback-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.feedback-section ul li {
+  padding: 10px 0;
+  padding-left: 24px;
+  position: relative;
+  color: #374151;
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.feedback-section ul li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: #10b981;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.feedback-section.areas-for-improvement ul li::before {
+  content: "→";
+  color: #f59e0b;
 }
 
 /* Scrollbar styling */

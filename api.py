@@ -22,6 +22,7 @@ from utils import (
     get_final_thanks_message,
     analyze_candidate_response_and_generate_new_question,
     get_feedback_of_candidate_response,
+    get_overall_interview_feedback,
     get_overall_evaluation_score,
     save_interview_data,
     transcribe_with_deepgram,
@@ -60,6 +61,12 @@ class ResumeUpload(BaseModel):
 
 class StartInterviewRequest(BaseModel):
     session_id: str
+
+
+class ProcessAnswerRequest(BaseModel):
+    session_id: str
+    transcript: str
+    question_index: int
 
 
 @app.get("/")
@@ -206,12 +213,12 @@ async def start_interview(request: StartInterviewRequest):
 
 
 @app.post("/api/process-answer")
-async def process_answer(
-    session_id: str,
-    transcript: str,
-    question_index: int
-):
+async def process_answer(request: ProcessAnswerRequest):
     """Process candidate's answer and generate next question or feedback"""
+    session_id = request.session_id
+    transcript = request.transcript
+    question_index = request.question_index
+    
     print(f"[API] Processing answer for session {session_id}, question {question_index}")
     print(f"[API] Transcript length: {len(transcript)}")
     try:
@@ -280,6 +287,29 @@ async def process_answer(
             # Calculate overall score
             overall_score = get_overall_evaluation_score(session["conversations"])
             
+            # Generate overall interview feedback
+            print(f"Generating overall interview feedback for session {session_id}")
+            try:
+                overall_feedback = await get_overall_interview_feedback(
+                    session["name"],
+                    session["conversations"],
+                    session["job_description"],
+                    session["resume_highlights"],
+                    overall_score
+                )
+                print(f"Overall feedback generated successfully")
+            except Exception as e:
+                print(f"Error generating overall feedback: {e}")
+                import traceback
+                traceback.print_exc()
+                # Provide fallback feedback if generation fails
+                overall_feedback = {
+                    "overall_feedback": f"Thank you for completing the interview. Your overall score is {round(overall_score, 2)}/10.",
+                    "key_strengths": [],
+                    "areas_for_improvement": [],
+                    "recommendation": "We appreciate your time and will review your responses carefully."
+                }
+            
             # Save interview data
             now = datetime.now().isoformat() + "Z"
             interview_data = {
@@ -291,6 +321,7 @@ async def process_answer(
                 "resume_highlights": session["resume_highlights"],
                 "conversations": session["conversations"],
                 "overall_score": round(overall_score, 2),
+                "overall_feedback": overall_feedback,
             }
             save_interview_data(interview_data, candidate_name=session["name"])
             
@@ -299,8 +330,9 @@ async def process_answer(
                 "next_question": None,
                 "thanks_message": thanks_message,
                 "interview_completed": True,
-                "overall_score": overall_score,
+                "overall_score": round(overall_score, 2),
                 "conversations": session["conversations"],
+                "overall_feedback": overall_feedback,
             }
         else:
             # Generate next question and feedback
@@ -733,6 +765,47 @@ async def process_audio_chunks(websocket, session_id, audio_chunks):
                     session["interview_completed"] = True
                     session["qa_index"] += 1
                     
+                    # Calculate overall score
+                    overall_score = get_overall_evaluation_score(session["conversations"])
+                    
+                    # Generate overall interview feedback
+                    print(f"[OpenAI LLM] Generating overall interview feedback...")
+                    try:
+                        overall_feedback = await get_overall_interview_feedback(
+                            session["name"],
+                            session["conversations"],
+                            session["job_description"],
+                            session["resume_highlights"],
+                            overall_score
+                        )
+                        print(f"[OpenAI LLM] Overall feedback generated successfully")
+                    except Exception as e:
+                        print(f"[OpenAI LLM] Error generating overall feedback: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Provide fallback feedback if generation fails
+                        overall_feedback = {
+                            "overall_feedback": f"Thank you for completing the interview. Your overall score is {round(overall_score, 2)}/10.",
+                            "key_strengths": [],
+                            "areas_for_improvement": [],
+                            "recommendation": "We appreciate your time and will review your responses carefully."
+                        }
+                    
+                    # Save interview data
+                    now = datetime.now().isoformat() + "Z"
+                    interview_data = {
+                        "name": session["name"],
+                        "createdAt": now,
+                        "updatedAt": now,
+                        "id": 1,
+                        "job_description": session["job_description"],
+                        "resume_highlights": session["resume_highlights"],
+                        "conversations": session["conversations"],
+                        "overall_score": round(overall_score, 2),
+                        "overall_feedback": overall_feedback,
+                    }
+                    save_interview_data(interview_data, candidate_name=session["name"])
+                    
                     # Generate thanks message
                     thanks_message = get_final_thanks_message(session["name"])
                     session["messages"].append({
@@ -746,11 +819,13 @@ async def process_audio_chunks(websocket, session_id, audio_chunks):
                     await send_text_as_audio(websocket, thanks_message, session.get("ai_voice", "alloy"))
                     print(f"[ElevenLabs] Thanks audio sent successfully")
                     
-                    # Send completion message
+                    # Send completion message with overall feedback
                     try:
                         await websocket.send_text(json.dumps({
                             "type": "interview_completed",
-                            "message": thanks_message
+                            "message": thanks_message,
+                            "overall_score": round(overall_score, 2),
+                            "overall_feedback": overall_feedback
                         }))
                     except:
                         # WebSocket closed, ignore

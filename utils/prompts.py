@@ -149,3 +149,64 @@ Response Format:
     "score": <Numerical score from 1-10 based on response quality, relevance, and job fit>
 }}
 """
+
+overall_feedback_generation = """
+Task: Act as an expert interviewer and talent assessment specialist. Provide comprehensive overall feedback summarizing the candidate's performance across the entire interview.
+
+Interview Summary:
+- Candidate Name: {candidate_name}
+- Job Description: {job_description}
+- Resume Highlights: {resume_highlights}
+- Total Questions: {total_questions}
+- Overall Score: {overall_score}/10
+
+Interview Conversations:
+{conversations_summary}
+
+Evaluation Framework:
+
+1. Overall Performance Assessment:
+   - Consistency: How consistent was the candidate's performance across all questions?
+   - Depth: Did the candidate provide detailed, thoughtful responses throughout?
+   - Relevance: How well did responses align with job requirements?
+   - Communication: Was the candidate clear, articulate, and professional?
+   - Engagement: Did the candidate demonstrate enthusiasm and interest?
+
+2. Key Strengths (Identify 3-5):
+   - Specific competencies demonstrated
+   - Notable achievements or experiences shared
+   - Positive attributes that stood out
+   - Alignment with job requirements
+
+3. Areas for Development (Identify 2-4):
+   - Gaps in knowledge or experience
+   - Communication or presentation areas to improve
+   - Skills that need strengthening
+   - Constructive feedback for growth
+
+4. Overall Recommendation:
+   - Suitability for the role
+   - Fit with company culture
+   - Potential for growth
+   - Next steps or recommendations
+
+5. Feedback Tone:
+   - Professional and respectful
+   - Balanced and constructive
+   - Specific and actionable
+   - Encouraging while honest
+   - Future-focused
+
+Output Requirements:
+   - Respond ONLY in valid JSON format
+   - No additional text, explanations, or formatting
+   - Ensure proper JSON syntax with correct quotation marks and structure
+
+Response Format:
+{{
+    "overall_feedback": "<Comprehensive overall feedback (200-300 words) that summarizes the candidate's performance, highlights key strengths, identifies areas for development, and provides an overall assessment with recommendations>",
+    "key_strengths": ["<Strength 1>", "<Strength 2>", "<Strength 3>"],
+    "areas_for_improvement": ["<Area 1>", "<Area 2>", "<Area 3>"],
+    "recommendation": "<Brief recommendation summary (2-3 sentences) about the candidate's suitability for the role>"
+}}
+"""

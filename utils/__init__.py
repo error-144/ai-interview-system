@@ -1,6 +1,7 @@
 from .analyze_candidate import (
     analyze_candidate_response_and_generate_new_question,
     get_feedback_of_candidate_response,
+    get_overall_interview_feedback,
 )
 from .load_content import load_content, load_content_streamlit
 # Note: record_utils functions require numpy/scipy and are not currently used
@@ -36,6 +37,7 @@ __all__ = [
     "get_ai_greeting_message",
     "extract_resume_info_using_llm",
     "get_feedback_of_candidate_response",
+    "get_overall_interview_feedback",
     "get_overall_evaluation_score",
     "basic_details",
     "next_question_generation",

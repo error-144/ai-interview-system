@@ -11,6 +11,8 @@ function ChatPanel({
   onStartRecording,
   onStopRecording,
   isRecording,
+  overallFeedback,
+  overallScore,
 }) {
   const [inputText, setInputText] = useState('')
   const messagesEndRef = useRef(null)
@@ -94,7 +96,62 @@ function ChatPanel({
 
       {interviewCompleted && (
         <div className="interview-completed">
-          <p>Interview completed! Thank you for your time.</p>
+          <div className="feedback-container">
+            <h3>Interview Feedback</h3>
+            
+            {overallScore !== null && (
+              <div className="score-section">
+                <div className="score-display">
+                  <span className="score-label">Overall Score:</span>
+                  <span className="score-value">{overallScore.toFixed(1)}/10</span>
+                </div>
+              </div>
+            )}
+            
+            {overallFeedback && (
+              <div className="feedback-content">
+                {overallFeedback.overall_feedback && (
+                  <div className="feedback-section">
+                    <h4>Overall Assessment</h4>
+                    <p>{overallFeedback.overall_feedback}</p>
+                  </div>
+                )}
+                
+                {overallFeedback.key_strengths && overallFeedback.key_strengths.length > 0 && (
+                  <div className="feedback-section">
+                    <h4>Key Strengths</h4>
+                    <ul>
+                      {overallFeedback.key_strengths.map((strength, index) => (
+                        <li key={index}>{strength}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {overallFeedback.areas_for_improvement && overallFeedback.areas_for_improvement.length > 0 && (
+                  <div className="feedback-section areas-for-improvement">
+                    <h4>Areas for Improvement</h4>
+                    <ul>
+                      {overallFeedback.areas_for_improvement.map((area, index) => (
+                        <li key={index}>{area}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {overallFeedback.recommendation && (
+                  <div className="feedback-section">
+                    <h4>Recommendation</h4>
+                    <p>{overallFeedback.recommendation}</p>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {!overallFeedback && (
+              <p>Interview completed! Thank you for your time.</p>
+            )}
+          </div>
         </div>
       )}
     </div>
