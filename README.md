@@ -6,53 +6,45 @@ An intelligent interview platform that conducts automated job interviews using A
 
 - **Resume Analysis**: Upload your PDF resume and get key highlights extracted automatically
 - **Personalized Questions**: AI generates interview questions based on your resume and the job description
-- **Voice Interaction**: Speak your answers naturally - the system will transcribe and analyze them
+- **Real-time Voice Interaction**: Speak your answers naturally - the system transcribes and analyzes them in real-time
+- **Text Input Support**: Type your answers if you prefer text over voice
 - **Real-time Chat**: Beautiful chat interface showing the conversation flow
 - **Video Feeds**: See yourself and the AI interviewer during the interview
 - **Intelligent Scoring**: Get detailed feedback and scores for each answer
-- **Complete Evaluation**: Receive an overall interview score and comprehensive report
+- **Complete Evaluation**: Receive an overall interview score and comprehensive feedback report
+- **Overall Feedback**: After interview completion, get detailed feedback including:
+  - Overall assessment summary
+  - Key strengths identified
+  - Areas for improvement
+  - Final recommendation
 
 ## 🚀 Tech Stack
 
 ### Backend
 - **FastAPI**: Modern Python web framework
-- **OpenAI GPT-4o mini**: For AI question generation and analysis
-- **OpenAI Whisper**: For speech-to-text transcription
+- **OpenAI GPT-4o mini**: For AI question generation, analysis, and feedback
+- **OpenAI Whisper**: For speech-to-text transcription (primary)
+- **Deepgram SDK**: For speech-to-text transcription (fallback support)
+- **ElevenLabs**: For text-to-speech conversion
+- **WebSockets**: For real-time bidirectional communication
 
 ### Frontend
-- **React**: UI library
+- **React**: UI library with hooks
 - **Vite**: Build tool
+- **WebSocket API**: For real-time audio streaming
+- **Web Audio API**: For audio capture and playback
 - **Modern CSS**: Beautiful, responsive design
 
 ## 📋 Prerequisites
 
 - Python 3.8+
 - Node.js 16+
-- OpenAI API key
-- Microphone and camera access
+- OpenAI API key (required)
+- ElevenLabs API key (required for voice responses)
+- Deepgram API key (optional, falls back to OpenAI Whisper)
+- Microphone and camera access (for voice/video features)
 
 ## 🛠️ Setup Instructions
-
-# 1. User stops talking → end_audio received
-if msg_type == "end_audio":
-    await process_audio_chunks(websocket, session_id, audio_chunks)
-
-# 2. Transcribe with Deepgram
-transcript = transcribe_with_deepgram(tmp_file_path)
-
-# 3. Send to OpenAI LLM
-next_question, feedback = await analyze_candidate_response_and_generate_new_question(
-    current_question,
-    transcript,  # Your speech transcribed
-    session["job_description"],
-    session["resume_highlights"],
-)
-
-# 4. Convert LLM response to audio with ElevenLabs
-await send_text_as_audio(websocket, next_question, voice)
-
-# 5. Frontend receives and plays audio
-
 
 ### 1. Backend Setup
 
@@ -72,11 +64,12 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create .env file
-cp .env.example .env
+# Create .env file (or edit existing one)
+# Add the following environment variables:
 
-# Edit .env and add your API key
-# OPENAI_API_KEY=your_actual_api_key_here
+# OPENAI_API_KEY=your_openai_api_key_here
+# ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+# DEEPGRAM_API_KEY=your_deepgram_api_key_here  # Optional, falls back to OpenAI Whisper
 ```
 
 ### 2. Frontend Setup
@@ -110,12 +103,41 @@ cd frontend
 npm run dev
 ```
 
-The frontend will run on `http://localhost:3000`
+The frontend will run on `http://localhost:5173` (Vite default port) or `http://localhost:3000` depending on configuration
+
+## 🔄 How It Works
+
+### Real-time Voice Mode Workflow
+
+1. **Audio Capture**: Frontend captures audio from microphone in real-time (PCM16, 16kHz)
+2. **Local Buffering**: Audio chunks are buffered locally until user stops speaking
+3. **Complete Audio Send**: When silence is detected, all buffered audio is sent at once
+4. **Transcription**: Backend transcribes the complete audio using OpenAI Whisper (or Deepgram)
+5. **LLM Processing**: Transcribed text is analyzed by OpenAI GPT-4o mini
+6. **Response Generation**: AI generates next question and feedback
+7. **Text-to-Speech**: Response is converted to audio using ElevenLabs
+8. **Audio Playback**: Frontend receives and plays the audio response
+9. **Microphone Resume**: System waits for AI to finish before accepting next input
+
+### Text Mode Workflow
+
+1. **Text Input**: User types answer in text field
+2. **API Request**: Frontend sends answer to `/api/process-answer` endpoint
+3. **LLM Processing**: Backend processes answer and generates response
+4. **Response Display**: Next question or feedback is displayed in chat
+
+### Interview Completion
+
+After all questions are answered:
+1. Overall score is calculated (average of all question scores)
+2. Comprehensive overall feedback is generated by LLM
+3. Feedback includes: overall assessment, key strengths, areas for improvement, and recommendation
+4. Results are saved and displayed to the candidate
 
 ## 🎯 How to Use
 
 1. **Upload Resume**: 
-   - Go to `http://localhost:3000`
+   - Go to `http://localhost:5173` (or your configured frontend port)
    - Upload your PDF resume
    - Paste the job description
    - Configure interview settings (max questions, AI voice)
@@ -123,46 +145,73 @@ The frontend will run on `http://localhost:3000`
 
 2. **Start Interview**:
    - Click "Start Interview" button
-   - Allow camera and microphone access when prompted
+   - Allow camera and microphone access when prompted (for voice mode)
+   - The AI will greet you and ask the first question
 
 3. **Answer Questions**:
-   - Listen to or read each question
-   - Click the microphone button to record your answer
-   - Or type your answer in the text input
-   - Click send or stop recording when done
+   - **Voice Mode (Real-time)**: 
+     - Speak your answer naturally
+     - The system will detect when you stop speaking
+     - Your complete answer will be processed automatically
+   - **Text Mode**: 
+     - Type your answer in the text input field
+     - Click the send button or press Enter
+   - Wait for the AI to process your response and ask the next question
 
 4. **Review Results**:
-   - After completing all questions, view your feedback
-   - See your overall score and detailed evaluation
+   - After completing all questions, you'll see:
+     - Overall score (out of 10)
+     - Comprehensive overall feedback
+     - Key strengths identified
+     - Areas for improvement
+     - Final recommendation
 
 ## 📁 Project Structure
 
 ```
 AI-Interview-System/
-├── api.py                 # FastAPI backend server
+├── api.py                 # FastAPI backend server with WebSocket support
 ├── frontend/              # React frontend
 │   ├── src/
 │   │   ├── components/   # React components
+│   │   │   ├── ChatPanel.jsx      # Chat interface
+│   │   │   ├── VideoPanel.jsx     # Video feeds
+│   │   │   └── UploadResume.jsx   # Resume upload
+│   │   ├── hooks/
+│   │   │   └── useRealtimeAPI.js  # WebSocket hook for real-time audio
 │   │   ├── App.jsx        # Main app component
 │   │   └── main.jsx       # Entry point
 │   └── package.json
 ├── utils/                 # Utility functions
 │   ├── llm_call.py        # OpenAI LLM integration
-│   ├── transcript_audio.py # Whisper transcription
-│   ├── analyze_candidate.py # Interview analysis
+│   ├── transcript_audio.py # Speech-to-text (Whisper/Deepgram)
+│   ├── text_to_speech.py  # Text-to-speech (ElevenLabs)
+│   ├── analyze_candidate.py # Interview analysis and feedback
+│   ├── prompts.py         # LLM prompt templates
+│   ├── evaluation.py      # Score calculation
 │   └── ...
 ├── requirements.txt       # Python dependencies
+├── .env                   # Environment variables (create this)
 └── README.md
 ```
 
 ## 🔧 API Endpoints
 
+### REST Endpoints
 - `POST /api/upload-resume` - Upload resume and create session
 - `POST /api/start-interview` - Start interview session
-- `POST /api/transcribe-audio` - Transcribe audio file
-- `POST /api/process-answer` - Process candidate answer and get next question
+- `POST /api/transcribe-audio` - Transcribe audio file (batch transcription)
+- `POST /api/process-answer` - Process candidate answer and get next question/feedback
+  - Request body: `{ session_id, transcript, question_index }`
+  - Returns: `{ next_question, feedback, interview_completed, overall_score, overall_feedback }`
 - `GET /api/interview-status/{session_id}` - Get interview status
 - `GET /api/interview-results/{session_id}` - Get final results
+- `GET /api/openai-websocket-url/{session_id}` - Get WebSocket URL for real-time mode
+
+### WebSocket Endpoints
+- `WS /api/openai-realtime/{session_id}` - Real-time audio streaming
+  - Receives: Audio chunks (PCM16, 16kHz) and control messages
+  - Sends: Audio responses (MP3), transcripts, questions, and feedback
 
 ## 🎨 Interface Features
 
@@ -177,17 +226,28 @@ AI-Interview-System/
 Create a `.env` file in the project root:
 
 ```env
+# Required
 OPENAI_API_KEY=your_openai_api_key_here
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+# Optional (falls back to OpenAI Whisper if not provided)
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+
+# Optional (defaults to gpt-4o-mini)
 LLM_MODEL=gpt-4o-mini
 ```
+
+**Note**: The system uses OpenAI Whisper for transcription if Deepgram API key is not provided.
 
 ## 📝 Notes
 
 - Make sure both backend and frontend are running
 - The backend API runs on port 8000
-- The frontend runs on port 3000
-- Camera and microphone permissions are required
-- Chrome browser is recommended for best audio recording experience
+- The frontend runs on port 5173 (Vite default) or 3000
+- Camera and microphone permissions are required for voice/video features
+- Chrome or Edge browser is recommended for best audio recording experience
+- The system buffers audio locally and sends complete answers at once for better accuracy
+- Microphone input is automatically paused while the AI is speaking to prevent interruptions
 
 ## 🐛 Troubleshooting
 
@@ -203,8 +263,20 @@ LLM_MODEL=gpt-4o-mini
 
 **Audio recording issues:**
 - Grant microphone permissions in browser
-- Use Chrome browser for best compatibility
+- Use Chrome or Edge browser for best compatibility
 - Check browser console for errors
+- Ensure WebSocket connection is established (check browser console)
+- If transcription fails, the system will fall back to OpenAI Whisper
+
+**422 Unprocessable Content error:**
+- Ensure you're sending the correct JSON format to `/api/process-answer`
+- Required fields: `session_id`, `transcript`, `question_index`
+- Check that the session exists and interview has started
+
+**Feedback not showing:**
+- Ensure the interview has completed (all questions answered)
+- Check browser console for any errors
+- Verify that overall feedback was generated (check backend logs)
 
 ## 📄 License
 
