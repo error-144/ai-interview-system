@@ -1,0 +1,26 @@
+# Core API Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# OpenAI Integration (for LLM calls)
+openai>=1.40.0
+
+# Speechmatics Flow Voice AI (using raw websockets)
+websockets>=12.0
+httpx>=0.25.0
+PyJWT>=2.8.0
+
+# PDF Processing
+pypdf==5.0.1
+PyPDF2==3.0.1
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# CORS Support (included in fastapi but explicit)
+pydantic==2.5.3
+
+# Audio Processing (optional, for future enhancements)
+numpy==1.26.3
+scipy==1.12.0
