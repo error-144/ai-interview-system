@@ -10,6 +10,7 @@ from pathlib import Path
 from openai import OpenAI
 import websockets
 import asyncio
+import struct
 
 # Load environment variables from .env file
 project_root = Path(__file__).parent
@@ -23,6 +24,9 @@ from utils import (
     get_feedback_of_candidate_response,
     get_overall_evaluation_score,
     save_interview_data,
+    transcribe_with_deepgram,
+    generate_speech_elevenlabs,
+    map_voice_to_elevenlabs,
 )
 
 app = FastAPI(title="AI Interview System API")
@@ -42,19 +46,16 @@ interview_sessions = {}
 # OpenAI client for LLM calls
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# Speechmatics API configuration
-SPEECHMATICS_API_KEY = os.environ.get("SPEECHMATICS_API_KEY")
-# Agent ID from Speechmatics Portal (found in agent settings)
-# Format: wss://eu2.rt.speechmatics.com/v1/agent/{AGENT_ID}/ws
-SPEECHMATICS_AGENT_ID = os.environ.get("SPEECHMATICS_AGENT_ID", "5a14d0ec-bec2-41a7-8307-34cb13d452f8")
-# Region: eu2 (EU region 2) - adjust if your agent is in a different region
-SPEECHMATICS_REGION = os.environ.get("SPEECHMATICS_REGION", "eu2")
+# OpenAI configuration (already initialized above)
+
+
+# map_voice_to_openai removed - now using ElevenLabs via map_voice_to_elevenlabs in utils/text_to_speech.py
 
 
 class ResumeUpload(BaseModel):
     job_description: str
     max_questions: int = 5
-    ai_voice: str = "Alex (Male)"
+    ai_voice: str = "alloy"  # Default to OpenAI voice name
 
 
 class StartInterviewRequest(BaseModel):
@@ -71,7 +72,7 @@ async def upload_resume(
     file: UploadFile = File(...),
     job_description: str = "",
     max_questions: int = 5,
-    ai_voice: str = "Alex (Male)"
+    ai_voice: str = "alloy"
 ):
     """Upload resume and extract information"""
     print(f"[API] Upload resume request received: {file.filename}")
@@ -131,12 +132,13 @@ async def upload_resume(
         
         # Create session
         session_id = f"session_{datetime.now().timestamp()}"
+        # Store original voice name (will be mapped to ElevenLabs when used)
         interview_sessions[session_id] = {
             "name": name,
             "resume_highlights": resume_highlights,
             "job_description": job_description,
             "max_questions": max_questions,
-            "ai_voice": ai_voice,
+            "ai_voice": ai_voice,  # Store original, map to ElevenLabs when generating speech
             "qa_index": 0,
             "conversations": [],
             "messages": [],
@@ -168,7 +170,7 @@ async def upload_resume(
 
 @app.post("/api/start-interview")
 async def start_interview(request: StartInterviewRequest):
-    """Start the interview session - Speechmatics Flow API will handle the greeting"""
+    """Start the interview session - OpenAI will handle the greeting"""
     print(f"[API] Starting interview for session {request.session_id}")
     try:
         session_id = request.session_id
@@ -180,11 +182,19 @@ async def start_interview(request: StartInterviewRequest):
         session["interview_started"] = True
         session["qa_index"] = 1
         
-        # No OpenAI greeting - Speechmatics Flow API agent will handle the conversation start
-        print(f"[API] Interview started successfully for {session['name']} - Speechmatics agent will initiate conversation")
+        # Generate greeting message
+        greeting_message = get_ai_greeting_message(session["name"], session["job_description"])
+        session["messages"].append({
+            "role": "assistant",
+            "content": greeting_message,
+            "timestamp": datetime.now().isoformat(),
+        })
+        
+        print(f"[API] Interview started successfully for {session['name']}")
         return {
-            "message": "Interview started. Connecting to Speechmatics agent...",
+            "message": "Interview started. Connecting to OpenAI...",
             "question_index": session["qa_index"],
+            "greeting": greeting_message,
         }
     except HTTPException:
         raise
@@ -376,107 +386,500 @@ async def get_interview_results(session_id: str):
     }
 
 
-@app.get("/api/speechmatics-credentials/{session_id}")
-async def get_speechmatics_credentials(session_id: str):
-    """Get Speechmatics API credentials for direct frontend connection"""
+@app.post("/api/transcribe-audio")
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    session_id: str = "",
+    question_index: int = 0
+):
+    """Transcribe audio file using Deepgram"""
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            content = await file.read()
+            if len(content) == 0:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty")
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            # Transcribe using Deepgram
+            transcript = transcribe_with_deepgram(tmp_file_path)
+            return {"transcript": transcript}
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[API] Error transcribing audio: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error transcribing audio: {str(e)}")
+
+
+@app.get("/api/openai-websocket-url/{session_id}")
+async def get_openai_websocket_url(session_id: str):
+    """Get OpenAI WebSocket URL for real-time transcription and TTS"""
     if session_id not in interview_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    if not SPEECHMATICS_API_KEY:
-        raise HTTPException(status_code=500, detail="Speechmatics API key not configured")
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
     
-    if not SPEECHMATICS_AGENT_ID:
-        raise HTTPException(status_code=500, detail="Speechmatics Agent ID not configured")
-    
-    # Return proxy WebSocket URL (backend handles authentication)
-    # Frontend connects to backend proxy, which forwards to Speechmatics Flow API with auth headers
-    # Use ws:// for localhost, wss:// for production
+    # Return WebSocket URL for OpenAI-based real-time API
     import socket
     hostname = socket.gethostname()
-    # For local development, use localhost; for production, use actual hostname
     proxy_host = "localhost" if "localhost" in hostname.lower() else "0.0.0.0"
-    proxy_ws_url = f"ws://{proxy_host}:8000/api/speechmatics-proxy/{session_id}"
-    
-    # Use template_id if available (includes :latest), otherwise use agent_id
-    template_id = os.environ.get("SPEECHMATICS_TEMPLATE_ID", SPEECHMATICS_AGENT_ID)
-    if template_id and ":" not in template_id:
-        template_id = f"{template_id}:latest"
+    ws_url = f"ws://{proxy_host}:8000/api/openai-realtime/{session_id}"
     
     return {
-        "api_key": SPEECHMATICS_API_KEY,  # Keep for reference, but proxy uses it
-        "agent_id": SPEECHMATICS_AGENT_ID,
-        "template_id": template_id,  # Include template_id for frontend
-        "region": SPEECHMATICS_REGION,  # Keep for reference
-        "ws_url": proxy_ws_url
+        "ws_url": ws_url
     }
 
 
-@app.websocket("/api/speechmatics-proxy/{session_id}")
-async def websocket_speechmatics_proxy(websocket: WebSocket, session_id: str):
+@app.websocket("/api/openai-realtime/{session_id}")
+async def websocket_openai_realtime(websocket: WebSocket, session_id: str):
     """
-    WebSocket proxy that adds Authorization header for Speechmatics Flow API.
-    Browser WebSocket API doesn't support custom headers, so we proxy through backend.
+    WebSocket endpoint for real-time transcription and TTS.
+    Uses Deepgram for STT and ElevenLabs for TTS.
+    Receives audio chunks, transcribes them, processes responses, and streams audio back.
     """
     await websocket.accept()
-    print(f"[Proxy] Frontend connected for session {session_id}")
+    print(f"[Deepgram+ElevenLabs] Frontend connected for session {session_id}")
     
     if session_id not in interview_sessions:
         await websocket.close(code=1008, reason="Session not found")
         return
     
-    if not SPEECHMATICS_API_KEY or not SPEECHMATICS_AGENT_ID:
-        await websocket.close(code=1011, reason="Speechmatics credentials not configured")
-        return
-    
-    # Construct Speechmatics Flow API WebSocket URL
-    # Flow API endpoint: wss://flow.api.speechmatics.com/
-    speechmatics_url = "wss://flow.api.speechmatics.com/"
+    session = interview_sessions[session_id]
+    audio_chunks = []
+    last_transcription_time = asyncio.get_event_loop().time()
+    transcription_interval = 1.0  # Fallback: transcribe every 1 second if no end_audio received
+    websocket_connected = True  # Initialize before try block
     
     try:
-        # Connect to Speechmatics with Authorization header
-        async with websockets.connect(
-            speechmatics_url,
-            additional_headers=[("Authorization", f"Bearer {SPEECHMATICS_API_KEY}")]
-        ) as speechmatics_ws:
-            print(f"[Proxy] Connected to Speechmatics Flow API: {speechmatics_url}")
-            
-            # Forward messages bidirectionally
-            async def forward_to_speechmatics():
-                try:
-                    while True:
-                        data = await websocket.receive()
-                        if "bytes" in data:
-                            await speechmatics_ws.send(data["bytes"])
-                        elif "text" in data:
-                            await speechmatics_ws.send(data["text"])
-                except WebSocketDisconnect:
-                    print("[Proxy] Frontend disconnected")
-                except Exception as e:
-                    print(f"[Proxy] Error forwarding to Speechmatics: {e}")
-            
-            async def forward_to_frontend():
-                try:
-                    while True:
-                        message = await speechmatics_ws.recv()
-                        if isinstance(message, bytes):
-                            await websocket.send_bytes(message)
+        # Send greeting if available
+        if session.get("messages") and len(session["messages"]) > 0:
+            last_message = session["messages"][-1]
+            if last_message.get("role") == "assistant":
+                greeting_text = last_message.get("content", "")
+                if greeting_text:
+                    try:
+                        print(f"[ElevenLabs] Sending greeting: {greeting_text[:100]}...")
+                        await send_text_as_audio(websocket, greeting_text, session.get("ai_voice", "alloy"))
+                        print(f"[ElevenLabs] Greeting audio sent successfully")
+                    except Exception as e:
+                        print(f"[OpenAI Realtime] Error sending greeting: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Don't disconnect on greeting error
+        
+        print("[Deepgram+ElevenLabs] Greeting sent, entering main message loop...")
+        print("[Deepgram] Ready to receive audio chunks from frontend...")
+        print("[Deepgram] Note: Audio chunks will only be sent when user speaks (above silence threshold)")
+        while websocket_connected:
+            try:
+                # Receive message from frontend
+                data = await websocket.receive()
+                
+                # Check if this is a disconnect message
+                if data.get("type") == "websocket.disconnect":
+                    print("[Deepgram+ElevenLabs] Frontend disconnected")
+                    websocket_connected = False
+                    break
+                
+                if "bytes" in data:
+                    # Audio chunk received - just accumulate, don't process until end_audio
+                    chunk_size = len(data["bytes"])
+                    audio_chunks.append(data["bytes"])
+                    
+                    # Log first chunk to confirm audio is being received
+                    if len(audio_chunks) == 1:
+                        print(f"[Deepgram] First audio chunk received ({chunk_size} bytes), buffering...")
+                    
+                    # Log occasionally to show we're receiving audio
+                    if len(audio_chunks) % 50 == 0:
+                        total_size = sum(len(chunk) for chunk in audio_chunks)
+                        print(f"[Deepgram] Buffering: {len(audio_chunks)} chunks ({total_size} bytes total)")
+                    
+                    # No timeout processing - only process on end_audio signal
+                
+                elif "text" in data:
+                    # Text message received (e.g., control messages)
+                    message = json.loads(data["text"])
+                    msg_type = message.get("type")
+                    
+                    if msg_type == "end_audio":
+                        # Process remaining audio chunks when user stops speaking
+                        if audio_chunks:
+                            total_audio_size = sum(len(chunk) for chunk in audio_chunks)
+                            print(f"[Deepgram] end_audio received, processing {len(audio_chunks)} chunks ({total_audio_size} bytes)")
+                            await process_audio_chunks(websocket, session_id, audio_chunks)
+                            audio_chunks = []
+                            # Reset transcription timer to prevent immediate re-processing
+                            last_transcription_time = asyncio.get_event_loop().time()
                         else:
-                            await websocket.send_text(message)
-                except Exception as e:
-                    print(f"[Proxy] Error forwarding to frontend: {e}")
-            
-            # Run both forwarding tasks concurrently
-            await asyncio.gather(
-                forward_to_speechmatics(),
-                forward_to_frontend(),
-                return_exceptions=True
-            )
-            
+                            print("[Deepgram] end_audio received but no audio chunks to process")
+                    elif msg_type == "ping":
+                        try:
+                            await websocket.send_text(json.dumps({"type": "pong"}))
+                        except:
+                            websocket_connected = False
+                            break
+                        
+            except WebSocketDisconnect:
+                print("[Deepgram+ElevenLabs] Frontend disconnected")
+                websocket_connected = False
+                break
+            except RuntimeError as e:
+                # Handle "Cannot call receive once a disconnect message has been received"
+                error_msg = str(e).lower()
+                if "disconnect" in error_msg or ("receive" in error_msg and "disconnect" in error_msg):
+                    print("[Deepgram+ElevenLabs] WebSocket disconnected (RuntimeError)")
+                    websocket_connected = False
+                    break
+                else:
+                    # Other runtime errors - log and break
+                    print(f"[OpenAI Realtime] Runtime error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    websocket_connected = False
+                    break
+            except Exception as e:
+                # Check if it's a disconnect-related error
+                error_msg = str(e).lower()
+                if "disconnect" in error_msg or "closed" in error_msg:
+                    print("[OpenAI Realtime] WebSocket disconnected")
+                    websocket_connected = False
+                    break
+                
+                print(f"[Deepgram+ElevenLabs] Error processing message: {e}")
+                import traceback
+                traceback.print_exc()
+                # Only send error if websocket is still connected
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": str(e)
+                    }))
+                except:
+                    # WebSocket already closed, exit loop
+                    websocket_connected = False
+                    break
+                
     except Exception as e:
-        print(f"[Proxy] Error connecting to Speechmatics: {e}")
+        print(f"[Deepgram+ElevenLabs] Error: {e}")
         import traceback
         traceback.print_exc()
-        await websocket.close(code=1011, reason=f"Failed to connect to Speechmatics: {str(e)}")
+        # Only close if not already closed and still connected
+        if websocket_connected:
+            try:
+                await websocket.close(code=1011, reason=f"Error: {str(e)}")
+            except:
+                # Already closed, ignore
+                pass
+
+
+def calculate_audio_level(pcm_data, sample_width=2):
+    """Calculate RMS (Root Mean Square) audio level to detect if there's actual speech"""
+    import struct
+    
+    # Convert PCM16 bytes to integers
+    samples = []
+    for i in range(0, len(pcm_data) - sample_width + 1, sample_width):
+        sample = struct.unpack('<h', pcm_data[i:i+sample_width])[0]
+        # Normalize to -1.0 to 1.0
+        normalized = sample / 32768.0
+        samples.append(normalized)
+    
+    if not samples:
+        return 0.0
+    
+    # Calculate RMS
+    sum_squares = sum(s * s for s in samples)
+    rms = (sum_squares / len(samples)) ** 0.5
+    return rms
+
+
+def create_wav_file(pcm_data, sample_rate=16000, channels=1, sample_width=2):
+    """Convert raw PCM data to WAV format"""
+    # WAV file header
+    num_samples = len(pcm_data) // sample_width
+    byte_rate = sample_rate * channels * sample_width
+    block_align = channels * sample_width
+    data_size = num_samples * block_align
+    file_size = 36 + data_size
+    
+    wav_header = struct.pack('<4sI4s4sIHHIIHH4sI',
+        b'RIFF',           # ChunkID
+        file_size,         # ChunkSize
+        b'WAVE',           # Format
+        b'fmt ',           # Subchunk1ID
+        16,                # Subchunk1Size (PCM)
+        1,                 # AudioFormat (PCM)
+        channels,          # NumChannels
+        sample_rate,       # SampleRate
+        byte_rate,         # ByteRate
+        block_align,       # BlockAlign
+        sample_width * 8,  # BitsPerSample
+        b'data',           # Subchunk2ID
+        data_size          # Subchunk2Size
+    )
+    
+    return wav_header + pcm_data
+
+
+async def process_audio_chunks(websocket, session_id, audio_chunks):
+    """Process accumulated audio chunks: transcribe, process, and respond"""
+    try:
+        # Combine audio chunks (raw PCM16 data)
+        combined_audio = b"".join(audio_chunks)
+        
+        # Check if we have enough audio data (at least 0.5 seconds)
+        min_audio_size = 16000 * 2 * 0.5  # 16kHz * 2 bytes * 0.5 seconds
+        if len(combined_audio) < min_audio_size:
+            print(f"[Deepgram] Audio too short: {len(combined_audio)} bytes, skipping")
+            return
+        
+        # Check audio level to filter out background noise
+        audio_level = calculate_audio_level(combined_audio)
+        AUDIO_THRESHOLD = 0.01  # Minimum RMS level to consider as speech
+        print(f"[Deepgram] Audio level (RMS): {audio_level:.4f}")
+        
+        if audio_level < AUDIO_THRESHOLD:
+            print(f"[Deepgram] Audio level too low ({audio_level:.4f} < {AUDIO_THRESHOLD}), likely background noise - skipping")
+            return
+        
+        print(f"[Deepgram] Converting {len(combined_audio)} bytes PCM to WAV format (level: {audio_level:.4f})")
+        # Convert PCM to WAV format
+        wav_data = create_wav_file(combined_audio, sample_rate=16000, channels=1, sample_width=2)
+        
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            tmp_file.write(wav_data)
+            tmp_file_path = tmp_file.name
+        
+        try:
+            print(f"[Deepgram] Transcribing audio file: {tmp_file_path}")
+            # Transcribe audio using Deepgram
+            transcript = transcribe_with_deepgram(tmp_file_path)
+            
+            # Check for transcription failures - don't process these as answers
+            if not transcript:
+                print(f"[Deepgram] Empty transcript, skipping processing")
+                return
+            
+            if transcript.startswith("Transcription failed") or transcript == "No speech detected in audio":
+                print(f"[Deepgram] Transcription failed or no speech detected: {transcript}")
+                print(f"[Deepgram] Skipping processing to avoid treating error as answer")
+                return
+            
+            print(f"[Deepgram] Transcript: {transcript}")
+            
+            # Send transcript to frontend
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "transcript",
+                    "role": "user",
+                    "content": transcript
+                }))
+            except:
+                # WebSocket closed, return early
+                return
+            
+            # Process answer and generate response using OpenAI LLM
+            if session_id in interview_sessions:
+                print(f"[OpenAI LLM] Processing transcript and generating response...")
+                session = interview_sessions[session_id]
+                
+                # Add user message
+                session["messages"].append({
+                    "role": "user",
+                    "content": transcript,
+                    "timestamp": datetime.now().isoformat(),
+                })
+                
+                # Get current question
+                current_question = None
+                for msg in reversed(session["messages"]):
+                    if msg["role"] == "assistant":
+                        current_question = msg["content"]
+                        break
+                
+                if not current_question:
+                    current_question = "Tell me about yourself and your experience."
+                
+                # Check if this is the last question
+                is_last_question = session["qa_index"] >= session["max_questions"]
+                
+                if is_last_question:
+                    # Generate feedback
+                    feedback = await get_feedback_of_candidate_response(
+                        current_question,
+                        transcript,
+                        session["job_description"],
+                        session["resume_highlights"],
+                    )
+                    
+                    session["conversations"].append({
+                        "Question": current_question,
+                        "Candidate Answer": transcript,
+                        "Evaluation": float(feedback["score"]),
+                        "Feedback": feedback["feedback"],
+                    })
+                    
+                    session["interview_completed"] = True
+                    session["qa_index"] += 1
+                    
+                    # Generate thanks message
+                    thanks_message = get_final_thanks_message(session["name"])
+                    session["messages"].append({
+                        "role": "assistant",
+                        "content": thanks_message,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    
+                    # Send thanks message as audio
+                    print(f"[OpenAI Realtime] Generating audio for thanks message")
+                    await send_text_as_audio(websocket, thanks_message, session.get("ai_voice", "alloy"))
+                    print(f"[ElevenLabs] Thanks audio sent successfully")
+                    
+                    # Send completion message
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "interview_completed",
+                            "message": thanks_message
+                        }))
+                    except:
+                        # WebSocket closed, ignore
+                        pass
+                else:
+                    # Generate next question using OpenAI LLM
+                    print(f"[OpenAI LLM] Analyzing candidate response and generating next question...")
+                    print(f"[OpenAI LLM] Current question: {current_question[:100]}...")
+                    print(f"[OpenAI LLM] Candidate response: {transcript[:100]}...")
+                    next_question, feedback = await analyze_candidate_response_and_generate_new_question(
+                        current_question,
+                        transcript,
+                        session["job_description"],
+                        session["resume_highlights"],
+                    )
+                    print(f"[OpenAI LLM] Generated next question: {next_question[:100]}...")
+                    print(f"[OpenAI LLM] Feedback score: {feedback.get('score', 'N/A')}")
+                    
+                    session["conversations"].append({
+                        "Question": current_question,
+                        "Candidate Answer": transcript,
+                        "Evaluation": float(feedback["score"]),
+                        "Feedback": feedback["feedback"],
+                    })
+                    
+                    session["messages"].append({
+                        "role": "assistant",
+                        "content": next_question,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    
+                    session["qa_index"] += 1
+                    
+                    # Send next question as audio
+                    print(f"[ElevenLabs] Generating audio for next question: {next_question[:50]}...")
+                    await send_text_as_audio(websocket, next_question, session.get("ai_voice", "alloy"))
+                    print(f"[ElevenLabs] Audio sent successfully")
+                    
+                    # Send next question message
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "next_question",
+                            "role": "assistant",
+                            "content": next_question,
+                            "question_index": session["qa_index"]
+                        }))
+                    except:
+                        # WebSocket closed, ignore
+                        pass
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+                
+    except Exception as e:
+        print(f"[OpenAI Realtime] Error processing audio chunks: {e}")
+        import traceback
+        traceback.print_exc()
+        # Send error to frontend but don't disconnect
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": f"Error processing audio: {str(e)}"
+            }))
+        except:
+            # WebSocket closed, ignore
+            pass
+
+
+async def send_text_as_audio(websocket, text, voice="alloy"):
+    """Generate speech from text and send as audio chunks using ElevenLabs"""
+    try:
+        # Map voice name to ElevenLabs voice ID
+        voice_id = map_voice_to_elevenlabs(voice)
+        
+        # Generate speech file using ElevenLabs
+        audio_file_path = generate_speech_elevenlabs(text, voice_id=voice_id)
+        
+        # Check if websocket is still connected before sending
+        try:
+            # Send audio format info first
+            await websocket.send_text(json.dumps({
+                "type": "audio_start",
+                "format": "mp3"
+            }))
+            
+            # Read and send audio in chunks
+            chunk_size = 8192  # Larger chunks for MP3
+            with open(audio_file_path, "rb") as audio_file:
+                while True:
+                    chunk = audio_file.read(chunk_size)
+                    if not chunk:
+                        break
+                    try:
+                        await websocket.send_bytes(chunk)
+                    except:
+                        # WebSocket closed, stop sending
+                        break
+            
+            # Send audio end marker (only if still connected)
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "audio_end"
+                }))
+            except:
+                # WebSocket closed, ignore
+                pass
+        except:
+            # WebSocket closed, just clean up
+            pass
+        
+        # Clean up temp file
+        if os.path.exists(audio_file_path):
+            os.unlink(audio_file_path)
+            
+    except Exception as e:
+        print(f"[ElevenLabs] Error generating/sending audio: {e}")
+        import traceback
+        traceback.print_exc()
+        # Send error to frontend but don't disconnect
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": f"Error generating audio: {str(e)}"
+            }))
+        except:
+            # WebSocket closed, ignore
+            pass
+        # Don't raise - let the caller handle WebSocket state
 
 
 if __name__ == "__main__":

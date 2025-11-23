@@ -54,17 +54,17 @@ function App() {
     setMaxQuestions(data.max_questions || 5)
   }
 
-  // Real-time API hook (Speechmatics Flow API via WebSocket proxy)
-  const { isConnected, sendAudio, endAudio } = useRealtimeAPI(
+  // Real-time API hook (OpenAI via WebSocket)
+  const { isConnected, sendAudio, endAudio, isAISpeaking } = useRealtimeAPI(
     interviewStarted && useRealtime ? sessionId : null,
     (message) => {
-      // Handle real-time messages from Flow API
+      // Handle real-time messages from OpenAI
       setMessages((prev) => [...prev, message])
     },
     (error) => {
-      console.error('Flow API error:', error)
+      console.error('OpenAI API error:', error)
       const errorMsg = error || 'Unknown error occurred'
-      alert(`Flow API Error: ${errorMsg}`)
+      alert(`OpenAI API Error: ${errorMsg}`)
     }
   )
 
@@ -72,7 +72,7 @@ function App() {
     if (!sessionId) return
 
     try {
-      // Mark interview as started - Speechmatics agent will handle the greeting
+      // Mark interview as started - OpenAI will handle the greeting
       const response = await fetch('/api/start-interview', {
         method: 'POST',
         headers: {
@@ -85,8 +85,15 @@ function App() {
       setInterviewStarted(true)
       setCurrentQuestionIndex(1)
       
-      // LiveKit handles audio automatically when connected
-      // No need to manually start audio streaming
+      // Start microphone capture for real-time audio processing
+      if (useRealtime) {
+        // Wait a bit for WebSocket to be ready, then start audio
+        setTimeout(() => {
+          startRealtimeAudio().catch(err => {
+            console.error('Error starting audio capture:', err)
+          })
+        }, 1000)
+      }
     } catch (error) {
       console.error('Error starting interview:', error)
       alert(`Error starting interview: ${error.message}`)
@@ -97,52 +104,162 @@ function App() {
     try {
       console.log('[Realtime] Starting audio capture...')
       
-      // Wait for WebSocket connection
+      // Wait for WebSocket connection (up to 5 seconds)
       let retries = 0
-      while (!isConnected && retries < 10) {
-        await new Promise(resolve => setTimeout(resolve, 500))
+      const maxRetries = 20
+      console.log(`[Realtime] Waiting for WebSocket connection (isConnected: ${isConnected})...`)
+      while (!isConnected && retries < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 250))
         retries++
+        if (retries % 4 === 0) {
+          console.log(`[Realtime] Still waiting for connection... (${retries * 250}ms elapsed)`)
+        }
       }
       
       if (!isConnected) {
-        console.warn('[Realtime] WebSocket not connected yet, but starting audio capture anyway')
+        console.warn('[Realtime] WebSocket not connected after waiting, but starting audio capture anyway')
+        console.log('[Realtime] Will start sending audio when connection is ready')
+        console.log('[Realtime] Note: Audio chunks will be queued until WebSocket connects')
+        console.log('[Realtime] The sendAudio function will check WebSocket state directly')
+      } else {
+        console.log('[Realtime] WebSocket connected, starting microphone...')
       }
       
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
-          sampleRate: 16000,  // Speechmatics Flow uses 16kHz
+          sampleRate: 16000,  // OpenAI Whisper uses 16kHz
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
         }
       })
       
-      console.log('[Speechmatics] Microphone access granted')
+      console.log('[OpenAI] Microphone access granted')
       audioStreamRef.current = stream
       
       // Create audio context for processing
       const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,  // Speechmatics Flow uses 16kHz
+        sampleRate: 16000,  // OpenAI Whisper uses 16kHz
       })
       realtimeAudioContextRef.current = audioContext
       
       const source = audioContext.createMediaStreamSource(stream)
       const processor = audioContext.createScriptProcessor(4096, 1, 1)
       
+      // Buffer to collect audio chunks locally
+      const audioBuffer = []
+      let audioChunkCount = 0
+      const SILENCE_THRESHOLD = 0.015  // RMS threshold for silence (adjust as needed)
+      const MIN_SPEECH_DURATION = 0.3  // Minimum speech duration in seconds
+      const SILENCE_CHUNKS_THRESHOLD = 6  // Number of silent chunks before considering silence (~1.5 seconds at 16kHz)
+      let speechStartTime = null
+      let isSpeaking = false
+      let consecutiveSilenceChunks = 0
+      let isWaitingForResponse = false  // Track if we're waiting for AI response
+      
       processor.onaudioprocess = (e) => {
-        if (!isConnected) return
-        
-        const inputData = e.inputBuffer.getChannelData(0)
-        // Convert Float32 to PCM16
-        const pcm16 = new Int16Array(inputData.length)
-        for (let i = 0; i < inputData.length; i++) {
-          const s = Math.max(-1, Math.min(1, inputData[i]))
-          pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+        // Pause microphone input while AI is speaking or waiting for response
+        if ((isAISpeaking && isAISpeaking()) || isWaitingForResponse) {
+          // Log occasionally to show we're waiting
+          if (audioChunkCount % 200 === 0) {
+            console.log('[Realtime] AI is speaking or processing, microphone paused...')
+          }
+          return  // Don't process microphone input while AI is speaking or processing
         }
         
-        // Send audio chunks directly to Speechmatics Flow via WebSocket proxy
-        if (sendAudio) {
-          sendAudio(pcm16.buffer)
+        const inputData = e.inputBuffer.getChannelData(0)
+        
+        // Calculate RMS (Root Mean Square) to detect audio level
+        let sum = 0
+        for (let i = 0; i < inputData.length; i++) {
+          sum += inputData[i] * inputData[i]
+        }
+        const rms = Math.sqrt(sum / inputData.length)
+        const currentTime = Date.now() / 1000
+        
+        // Detect speech (audio level above threshold)
+        if (rms > SILENCE_THRESHOLD) {
+          consecutiveSilenceChunks = 0
+          
+          if (!isSpeaking) {
+            isSpeaking = true
+            speechStartTime = currentTime
+            audioBuffer.length = 0  // Clear buffer for new speech
+            console.log('[Realtime] Speech detected, buffering audio locally')
+          }
+          
+          // Convert Float32 to PCM16 and add to buffer (don't send yet)
+          const pcm16 = new Int16Array(inputData.length)
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]))
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+          }
+          
+          // Add to local buffer instead of sending immediately
+          audioBuffer.push(pcm16.buffer)
+          audioChunkCount++
+          
+          // Log occasionally
+          if (audioChunkCount % 50 === 0) {
+            const totalSize = audioBuffer.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+            console.log(`[Realtime] Buffering audio: ${audioBuffer.length} chunks (${totalSize} bytes)`)
+          }
+          
+        } else {
+          // Silence detected
+          consecutiveSilenceChunks++
+          
+          if (isSpeaking) {
+            // Check if we had enough speech duration
+            const speechDuration = currentTime - speechStartTime
+            
+            if (speechDuration >= MIN_SPEECH_DURATION) {
+              // Check if we've had enough consecutive silence chunks
+              if (consecutiveSilenceChunks >= SILENCE_CHUNKS_THRESHOLD) {
+                // User finished speaking - send all buffered audio at once
+                const totalSize = audioBuffer.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+                console.log(`[Realtime] Speech ended (${speechDuration.toFixed(2)}s), sending complete audio: ${audioBuffer.length} chunks (${totalSize} bytes)`)
+                
+                // Send all buffered chunks at once
+                if (sendAudio && audioBuffer.length > 0) {
+                  isWaitingForResponse = true  // Block further input until response received
+                  
+                  // Send all chunks sequentially
+                  audioBuffer.forEach((chunk, index) => {
+                    try {
+                      sendAudio(chunk)
+                      if (index === 0) {
+                        console.log(`[Realtime] Started sending ${audioBuffer.length} buffered chunks`)
+                      }
+                    } catch (err) {
+                      console.error('[Realtime] Error sending audio chunk:', err)
+                    }
+                  })
+                  
+                  // Send end_audio signal after all chunks are sent
+                  setTimeout(() => {
+                    if (endAudio) {
+                      endAudio()
+                      console.log('[Realtime] Sent end_audio signal, waiting for AI response...')
+                    }
+                  }, 100)  // Small delay to ensure all chunks are sent first
+                }
+                
+                // Reset state
+                isSpeaking = false
+                speechStartTime = null
+                consecutiveSilenceChunks = 0
+                audioBuffer.length = 0
+              }
+            } else if (consecutiveSilenceChunks >= SILENCE_CHUNKS_THRESHOLD) {
+              // Speech too short, discard
+              console.log(`[Realtime] Speech too short (${speechDuration.toFixed(2)}s), discarding`)
+              isSpeaking = false
+              speechStartTime = null
+              consecutiveSilenceChunks = 0
+              audioBuffer.length = 0
+            }
+          }
         }
       }
       
@@ -152,6 +269,28 @@ function App() {
       
       setIsListening(true)
       console.log('[Realtime] Audio streaming started')
+      console.log('[Realtime] Audio context sample rate:', audioContext.sampleRate)
+      console.log('[Realtime] Processor buffer size:', processor.bufferSize)
+      console.log('[Realtime] sendAudio function available:', !!sendAudio)
+      console.log('[Realtime] isConnected state:', isConnected)
+      
+      // Listen for AI response completion to resume microphone input
+      const handleAIResponseComplete = () => {
+        console.log('[Realtime] AI response complete, resuming microphone input')
+        isWaitingForResponse = false
+      }
+      
+      window.addEventListener('aiResponseComplete', handleAIResponseComplete)
+      
+      // Store cleanup function
+      const cleanup = () => {
+        window.removeEventListener('aiResponseComplete', handleAIResponseComplete)
+      }
+      
+      // Store cleanup in a way that can be called later
+      if (audioProcessorRef.current) {
+        audioProcessorRef.current._cleanup = cleanup
+      }
       
     } catch (error) {
       console.error('Error starting real-time audio:', error)
@@ -160,9 +299,14 @@ function App() {
   }
 
   const stopRealtimeAudio = () => {
-    // Send AudioEnded message to Flow API
+    // Send end_audio message to OpenAI
     if (endAudio) {
       endAudio()
+    }
+    
+    // Cleanup event listener
+    if (audioProcessorRef.current && audioProcessorRef.current._cleanup) {
+      audioProcessorRef.current._cleanup()
     }
     
     if (audioStreamRef.current) {
@@ -178,7 +322,7 @@ function App() {
       realtimeAudioContextRef.current = null
     }
     setIsListening(false)
-    console.log('[Flow API] Audio streaming stopped')
+    console.log('[OpenAI] Audio streaming stopped')
   }
 
   const startRecording = async () => {
@@ -226,6 +370,30 @@ function App() {
       setIsListening(false)
     }
   }
+  
+  // Resume audio context on user interaction (browser autoplay policy)
+  useEffect(() => {
+    const handleUserInteraction = async () => {
+      // Resume audio context when user interacts (click, touch, etc.)
+      if (realtimeAudioContextRef.current && realtimeAudioContextRef.current.state === 'suspended') {
+        try {
+          await realtimeAudioContextRef.current.resume()
+          console.log('[App] Audio context resumed after user interaction')
+        } catch (err) {
+          console.error('[App] Error resuming audio context:', err)
+        }
+      }
+    }
+    
+    // Add event listeners for user interaction
+    window.addEventListener('click', handleUserInteraction, { once: true })
+    window.addEventListener('touchstart', handleUserInteraction, { once: true })
+    
+    return () => {
+      window.removeEventListener('click', handleUserInteraction)
+      window.removeEventListener('touchstart', handleUserInteraction)
+    }
+  }, [])
   
   // Cleanup on unmount
   useEffect(() => {

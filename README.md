@@ -33,6 +33,27 @@ An intelligent interview platform that conducts automated job interviews using A
 
 ## 🛠️ Setup Instructions
 
+# 1. User stops talking → end_audio received
+if msg_type == "end_audio":
+    await process_audio_chunks(websocket, session_id, audio_chunks)
+
+# 2. Transcribe with Deepgram
+transcript = transcribe_with_deepgram(tmp_file_path)
+
+# 3. Send to OpenAI LLM
+next_question, feedback = await analyze_candidate_response_and_generate_new_question(
+    current_question,
+    transcript,  # Your speech transcribed
+    session["job_description"],
+    session["resume_highlights"],
+)
+
+# 4. Convert LLM response to audio with ElevenLabs
+await send_text_as_audio(websocket, next_question, voice)
+
+# 5. Frontend receives and plays audio
+
+
 ### 1. Backend Setup
 
 ```bash
@@ -54,9 +75,8 @@ pip install -r requirements.txt
 # Create .env file
 cp .env.example .env
 
-# Edit .env and add your API keys
+# Edit .env and add your API key
 # OPENAI_API_KEY=your_actual_api_key_here
-# SPEECHMATICS_API_KEY=your_speechmatics_api_key_here
 ```
 
 ### 2. Frontend Setup
